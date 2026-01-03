@@ -15,7 +15,9 @@ from aiogram.types import BufferedInputFile, ReplyKeyboardMarkup, KeyboardButton
 from threading import Thread
 
 # --- SOZLAMALAR ---
-API_TOKEN = '8110490890:AAHctM-quwHgHNNT4mTPBkaIzGjWiDk1vtE'
+# Tokenni yangilagan bo'lsangiz, yangisini qo'ying
+API_TOKEN = '8231142795:AAE5Z2mnf_TJP31pT9SaeIkfiVAaZWApxlc'
+# O'zingizning ID raqamingizni @userinfobot orqali tekshirib yozing
 ADMIN_ID = 7693087447 
 BASE_URL = "https://bot2-l6hj.onrender.com" 
 
@@ -38,7 +40,7 @@ def init_db():
 
 init_db()
 
-def update_db(qr_id, password, link=None, increment_scans=False):
+def update_db(qr_id, password=None, link=None, increment_scans=False):
     conn = sqlite3.connect('database.db')
     cursor = conn.cursor()
     if link:
@@ -62,7 +64,7 @@ def get_qr_data(qr_id):
 # --- WEB REDIRECTOR ---
 @app.route('/')
 def home():
-    return "🚀 QR Tizimi (SQLite) Ishlamoqda!"
+    return "🚀 QR Tizimi Serveri Ishlamoqda!"
 
 @app.route('/go/<qr_id>')
 def redirect_handler(qr_id):
@@ -70,9 +72,22 @@ def redirect_handler(qr_id):
     if data:
         target_link = data[2]
         if target_link and target_link.startswith("http"):
-            update_db(qr_id, None, increment_scans=True)
+            update_db(qr_id, increment_scans=True)
             return redirect(target_link)
-        return "⚠️ QR kod hali sozlanmagan."
+        
+        # Link yo'q bo'lsa, botga yo'naltirish tugmasi
+        bot_link = f"https://t.me/QRedit_bot?start={qr_id}"
+        return render_template_string(f"""
+            <body style="background:#121212;color:white;text-align:center;font-family:sans-serif;padding-top:100px;">
+                <h1 style="color:#ffcc00;">⚠️ QR Sozlanmagan</h1>
+                <p>Ushbu QR kodga link biriktirish uchun quyidagi tugmani bosing:</p>
+                <br>
+                <a href="{bot_link}" 
+                   style="display:inline-block;padding:15px 30px;background:#0088cc;color:white;text-decoration:none;border-radius:50px;font-weight:bold;">
+                   ⚙️ Botda sozlash
+                </a>
+            </body>
+        """)
     return "❌ Topilmadi.", 404
 
 # --- BOT QISMI ---
@@ -92,13 +107,15 @@ async def cmd_start(message: types.Message, state: FSMContext):
         data = get_qr_data(qr_id)
         if data:
             await state.update_data(qr_id=qr_id, qr_pass=data[1])
-            await message.answer(f"🆔 ID: {qr_id}\n\nParolni kiriting:")
+            await message.answer(f"🆔 QR-ID: {qr_id}\n\nUshbu QR kodni sozlash uchun parolni kiriting:")
             await state.set_state(QRStates.waiting_for_password)
         else:
-            await message.answer("Bunday QR kod bazada yo'q.")
+            await message.answer("❌ Xato: Bunday QR kod bazada mavjud emas.")
     elif message.from_user.id == ADMIN_ID:
         kb = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="➕ QR Yaratish")]], resize_keyboard=True)
-        await message.answer("Salom Admin!", reply_markup=kb)
+        await message.answer("Salom Admin! Yangi QR kod yaratish uchun tugmani bosing.", reply_markup=kb)
+    else:
+        await message.answer("Xush kelibsiz! Ushbu bot QR kodlarni boshqarish uchun ishlatiladi.")
 
 @dp.message(F.text == "➕ QR Yaratish")
 async def admin_gen(message: types.Message):
@@ -106,28 +123,33 @@ async def admin_gen(message: types.Message):
         qr_id = f"ID{random.randint(1000, 9999)}"
         password = ''.join(random.choices(string.digits, k=4))
         update_db(qr_id, password)
+        
         qr_url = f"{BASE_URL}/go/{qr_id}"
         qr = qrcode.make(qr_url)
         buf = io.BytesIO()
         qr.save(buf)
         photo = BufferedInputFile(buf.getvalue(), filename=f"{qr_id}.png")
-        await message.answer_photo(photo, caption=f"✅ QR yaratildi!\n🔗 Link: {qr_url}\n🔑 Parol: {password}")
+        
+        await message.answer_photo(
+            photo, 
+            caption=f"✅ Yangi QR kod yaratildi!\n\n🔗 Link: {qr_url}\n🔑 Parol: {password}\n\nSkaner qiling va sozlang!"
+        )
 
 @dp.message(QRStates.waiting_for_password)
 async def process_password(message: types.Message, state: FSMContext):
     data = await state.get_data()
     if message.text == data['qr_pass']:
-        await message.answer("To'g'ri! Endi linkni yuboring:")
+        await message.answer("✅ Parol to'g'ri! Endi QR kod skaner qilinganda ochilishi kerak bo'lgan linkni yuboring (masalan: instagram.com/profil):")
         await state.set_state(QRStates.waiting_for_link)
     else:
-        await message.answer("Xato parol!")
+        await message.answer("❌ Xato parol! Qayta urinib ko'ring:")
 
 @dp.message(QRStates.waiting_for_link)
 async def process_link(message: types.Message, state: FSMContext):
     link = message.text if message.text.startswith("http") else f"https://{message.text}"
     data = await state.get_data()
-    update_db(data['qr_id'], None, link=link)
-    await message.answer(f"✅ Muvaffaqiyatli saqlandi!")
+    update_db(data['qr_id'], link=link)
+    await message.answer(f"🎉 Muvaffaqiyatli saqlandi!\n\nEndi ushbu QR kod foydalanuvchini mana bu yerga yuboradi:\n{link}")
     await state.clear()
 
 def run_flask():
@@ -140,6 +162,3 @@ async def run_bot():
 if __name__ == "__main__":
     Thread(target=run_flask).start()
     asyncio.run(run_bot())
-
-
-
