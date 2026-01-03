@@ -16,7 +16,7 @@ from aiogram.types import BufferedInputFile, ReplyKeyboardMarkup, KeyboardButton
 from threading import Thread
 
 # --- SOZLAMALAR ---
-API_TOKEN = '8110490890:AAHTd6WduBLqjqD2lHfT62x1XnaELBQfjuY'
+API_TOKEN = '8110490890:AAFtGFTjLW0n3mwR6rU7vnZGqEb1sajeOro'
 ADMIN_ID = 7693087447 
 SHEET_NAME = "QR_Biznes" # Google Sheets faylingiz nomi aynan shunday bo'lishi shart!
 
@@ -152,3 +152,4 @@ async def run_bot():
 if __name__ == "__main__":
     Thread(target=run_flask).start()
     asyncio.run(run_bot())
+
