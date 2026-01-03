@@ -15,7 +15,7 @@ from aiogram.types import BufferedInputFile, ReplyKeyboardMarkup, KeyboardButton
 from threading import Thread
 
 # --- SOZLAMALAR ---
-API_TOKEN = '8231142795:AAERQML-EPpxJ1GRyd2u4eQAd6R6Ek1iYzM'
+API_TOKEN = '8110490890:AAFpnaQUqlqYYt0v8MOp1VWW8gBqCNWxxhY'
 ADMIN_ID = 7693087447 
 BASE_URL = "https://bot2-l6hj.onrender.com" 
 
@@ -157,3 +157,4 @@ async def run_bot():
 if __name__ == "__main__":
     Thread(target=run_flask).start()
     asyncio.run(run_bot())
+
