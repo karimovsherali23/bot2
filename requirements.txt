@@ -4,3 +4,5 @@ qrcode
 gspread
 oauth2client
 Pillow
+psycopg2-binary
+
