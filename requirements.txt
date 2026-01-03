@@ -1,5 +1,6 @@
-flask
 aiogram
+flask
 qrcode
 gspread
 oauth2client
+Pillow
