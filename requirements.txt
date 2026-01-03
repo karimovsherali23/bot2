@@ -1,0 +1,5 @@
+flask
+aiogram
+qrcode
+gspread
+oauth2client
