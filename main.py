@@ -21,7 +21,7 @@ ADMIN_ID = 7693087447
 SHEET_NAME = "QR_Biznes"
 
 # !!! DIQQAT: Bu yerga o'z domeningizni yozasiz (masalan: https://sizningdomen.uz)
-BASE_URL = "https://marsmobi-qr.onrender.com" 
+BASE_URL = "https://bot2-l6hj.onrender.com"
 
 app = Flask(__name__)
 
@@ -141,4 +141,5 @@ async def run_bot():
 
 if __name__ == "__main__":
     Thread(target=run_flask).start()
+
     asyncio.run(run_bot())
