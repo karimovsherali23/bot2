@@ -16,7 +16,7 @@ from aiogram.types import BufferedInputFile, ReplyKeyboardMarkup, KeyboardButton
 from threading import Thread
 
 # --- SOZLAMALAR ---
-API_TOKEN = '8110490890:AAEovTgj07x1gnR5ylBryvl2mF1IvwUieMs'
+API_TOKEN = '8110490890:AAGBzLnMHykJ_7sv25ohj6RxFdM2g6NvwMY'
 ADMIN_ID = 7693087447 
 BASE_URL = "https://bot2-l6hj.onrender.com" 
 DB_URL = "postgresql://qr_baza_user:TiEUOA70TG53kF9nvUecCWAGH938wSdN@dpg-d5cosder433s739v350g-a.oregon-postgres.render.com/qr_baza"
@@ -30,7 +30,7 @@ def get_db_connection():
 def init_db():
     conn = get_db_connection()
     cur = conn.cursor()
-    # owner_id ustuni foydalanuvchini aniqlash uchun qo'shildi
+    # MUHIM: Agar owner_id ustuni bo'lmasa, uni qo'shamiz
     cur.execute('''
         CREATE TABLE IF NOT EXISTS qrcodes (
             qr_id TEXT PRIMARY KEY,
@@ -40,6 +40,12 @@ def init_db():
             owner_id BIGINT
         )
     ''')
+    # Jadvalda ustun bormi-yo'qligini tekshirish va xatolikni oldini olish
+    try:
+        cur.execute("ALTER TABLE qrcodes ADD COLUMN owner_id BIGINT;")
+    except psycopg2.errors.DuplicateColumn:
+        pass # Ustun allaqachon bor bo'lsa, e'tibor bermaymiz
+    
     conn.commit()
     cur.close()
     conn.close()
@@ -49,22 +55,25 @@ init_db()
 # --- WEB SERVER ---
 @app.route('/go/<qr_id>')
 def redirect_handler(qr_id):
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("SELECT target_link FROM qrcodes WHERE qr_id = %s", (qr_id,))
-    data = cur.fetchone()
-    if data:
-        target_link = data[0]
-        if target_link and target_link.startswith("http"):
-            cur.execute("UPDATE qrcodes SET scans = scans + 1 WHERE qr_id = %s", (qr_id,))
-            conn.commit()
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT target_link FROM qrcodes WHERE qr_id = %s", (qr_id,))
+        data = cur.fetchone()
+        if data:
+            target_link = data[0]
+            if target_link and target_link.startswith("http"):
+                cur.execute("UPDATE qrcodes SET scans = scans + 1 WHERE qr_id = %s", (qr_id,))
+                conn.commit()
+                return redirect(target_link)
+            
+            bot_link = f"https://t.me/QRedit_bot?start={qr_id}"
+            return render_template_string(f'<script>window.location.href="{bot_link}";</script>')
+        return "❌ Topilmadi", 404
+    finally:
+        if conn:
             cur.close()
             conn.close()
-            return redirect(target_link)
-        
-        bot_link = f"https://t.me/QRedit_bot?start={qr_id}"
-        return render_template_string(f'<script>window.location.href="{bot_link}";</script>')
-    return "❌ Xato", 404
 
 # --- BOT QISMI ---
 bot = Bot(token=API_TOKEN)
@@ -73,7 +82,6 @@ dp = Dispatcher()
 class EditStates(StatesGroup):
     waiting_for_new_link = State()
 
-# --- KLAVIATURALAR ---
 def main_menu(user_id):
     buttons = [[KeyboardButton(text="📊 Mening QR kodlarim")]]
     if user_id == ADMIN_ID:
@@ -87,24 +95,23 @@ async def cmd_start(message: types.Message, state: FSMContext):
         qr_id = args[0]
         conn = get_db_connection()
         cur = conn.cursor()
-        cur.execute("SELECT owner_id, password FROM qrcodes WHERE qr_id = %s", (qr_id,))
+        cur.execute("SELECT owner_id FROM qrcodes WHERE qr_id = %s", (qr_id,))
         res = cur.fetchone()
         
         if res:
-            owner_id, password = res
+            owner_id = res[0]
             if owner_id is None:
-                # QR kod hali hech kimga tegishli emas, ulaymiz
                 cur.execute("UPDATE qrcodes SET owner_id = %s WHERE qr_id = %s", (message.from_user.id, qr_id))
                 conn.commit()
-                await message.answer(f"✅ Ushbu QR kod ({qr_id}) profilingizga biriktirildi!\nEndi linkni yuboring:")
+                await message.answer(f"✅ QR ({qr_id}) profilingizga biriktirildi! Endi linkni yuboring:")
                 await state.update_data(qr_id=qr_id)
                 await state.set_state(EditStates.waiting_for_new_link)
             elif owner_id == message.from_user.id:
-                await message.answer("Siz ushbu QR kod egasisiz. Yangi link yuboring:")
+                await message.answer("Siz egasisiz. Yangi linkni yuboring:")
                 await state.update_data(qr_id=qr_id)
                 await state.set_state(EditStates.waiting_for_new_link)
             else:
-                await message.answer("❌ Bu QR kod boshqa foydalanuvchiga tegishli.")
+                await message.answer("❌ Bu QR band.")
         cur.close()
         conn.close()
     else:
@@ -118,17 +125,14 @@ async def my_qrs(message: types.Message):
     rows = cur.fetchall()
     
     if not rows:
-        await message.answer("Sizda hali biriktirilgan QR kodlar yo'q.")
+        await message.answer("Hali QR kodlaringiz yo'q.")
     else:
         for row in rows:
-            text = (f"🆔 **ID:** `{row['qr_id']}`\n"
-                    f"🔗 **Link:** {row['target_link'] or 'Sozlanmagan'}\n"
-                    f"👁 **Skanerlar soni:** {row['scans']}\n"
-                    f"🔑 **Parol:** `{row['password']}`")
-            
+            text = (f"🆔 ID: `{row['qr_id']}`\n"
+                    f"🔗 Link: {row['target_link'] or 'Yoq'}\n"
+                    f"👁 Skaner: {row['scans']}")
             kb = InlineKeyboardMarkup(inline_keyboard=[[
-                InlineKeyboardButton(text="✏️ Tahrirlash", callback_data=f"edit_{row['qr_id']}"),
-                InlineKeyboardButton(text="🖼 QR yuklash", callback_data=f"getqr_{row['qr_id']}")
+                InlineKeyboardButton(text="✏️ Tahrirlash", callback_data=f"edit_{row['qr_id']}")
             ]])
             await message.answer(text, reply_markup=kb, parse_mode="Markdown")
     cur.close()
@@ -155,7 +159,7 @@ async def process_new_link(message: types.Message, state: FSMContext):
     cur.close()
     conn.close()
     
-    await message.answer("✅ Muvaffaqiyatli saqlandi!", reply_markup=main_menu(message.from_user.id))
+    await message.answer("✅ Saqlandi!", reply_markup=main_menu(message.from_user.id))
     await state.clear()
 
 @dp.message(F.text == "➕ Yangi QR yaratish (Admin)")
@@ -163,7 +167,6 @@ async def admin_gen(message: types.Message):
     if message.from_user.id == ADMIN_ID:
         qr_id = f"ID{random.randint(1000, 9999)}"
         password = ''.join(random.choices(string.digits, k=4))
-        
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute("INSERT INTO qrcodes (qr_id, password, target_link, scans) VALUES (%s, %s, %s, %s)", 
@@ -177,9 +180,8 @@ async def admin_gen(message: types.Message):
         buf = io.BytesIO()
         qr.save(buf)
         photo = BufferedInputFile(buf.getvalue(), filename=f"{qr_id}.png")
-        await message.answer_photo(photo, caption=f"✅ Yangi bo'sh QR yaratildi!\n🆔 ID: {qr_id}\n🔑 Parol: {password}")
+        await message.answer_photo(photo, caption=f"✅ Yaratildi!\n🆔 {qr_id}\n🔑 {password}")
 
-# --- ISHGA TUSHIRISH ---
 def run_flask():
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
 
