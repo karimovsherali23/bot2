@@ -26,7 +26,7 @@ from aiogram.types import BufferedInputFile, ReplyKeyboardMarkup, KeyboardButton
 from threading import Thread
 
 # --- SOZLAMALAR ---
-API_TOKEN = '8110490890:AAHT7WrEHMe9XEoxd2WoniH9WlaIhR0YUNY'
+API_TOKEN = '8231142795:AAERQML-EPpxJ1GRyd2u4eQAd6R6Ek1iYzM'
 ADMIN_ID = 7693087447         
 ADMIN_PRINT_ID = 7693087447   
 BASE_URL = "https://bot2-l6hj.onrender.com" 
@@ -80,7 +80,7 @@ def redirect_handler(qr_id):
         conn.close()
         if target_link and target_link.startswith("http"):
             return redirect(target_link)
-        bot_link = f"https://t.me/QRedit_bot?start={qr_id}"
+        bot_link = f"https://t.me/QRme1bot?start={qr_id}"
         return render_template_string(f'<script>window.location.href="{bot_link}";</script>')
     return "❌ QR Topilmadi", 404
 
@@ -294,3 +294,4 @@ async def run_bot():
 if __name__ == "__main__":
     Thread(target=run_flask).start()
     asyncio.run(run_bot())
+
