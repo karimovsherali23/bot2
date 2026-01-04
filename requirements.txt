@@ -8,5 +8,7 @@ psycopg2-binary
 matplotlib
 pandas
 opencv-python-headless
+reportlab
+
 
 
