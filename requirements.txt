@@ -7,5 +7,6 @@ Pillow
 psycopg2-binary
 matplotlib
 pandas
-pyzbar
+opencv-python-headless
+
 
