@@ -11,6 +11,12 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 import cv2
+
+# PDF yaratish uchun kutubxonalar
+from reportlab.pdfgen import canvas
+from reportlab.lib.units import mm
+from reportlab.lib.utils import ImageReader
+
 from flask import Flask, redirect, render_template_string
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
@@ -21,9 +27,8 @@ from threading import Thread
 
 # --- SOZLAMALAR ---
 API_TOKEN = '8110490890:AAHT7WrEHMe9XEoxd2WoniH9WlaIhR0YUNY'
-ADMIN_ID = 7693087447         # Asosiy boshqaruvchi admin
-ADMIN_PRINT_ID = 7693087447   # QR kodlarni chop etish uchun qabul qiluvchi admin
-
+ADMIN_ID = 7693087447         
+ADMIN_PRINT_ID = 7693087447   
 BASE_URL = "https://bot2-l6hj.onrender.com" 
 DB_URL = "postgresql://qr_baza_user:TiEUOA70TG53kF9nvUecCWAGH938wSdN@dpg-d5cosder433s739v350g-a.oregon-postgres.render.com/qr_baza"
 
@@ -57,9 +62,9 @@ def init_db():
 
 init_db()
 
-# --- WEB SERVER (REDIRECTOR) ---
+# --- WEB SERVER ---
 @app.route('/')
-def home(): return "QR Print System v2.0 Active"
+def home(): return "QR High-Quality PDF Server Active"
 
 @app.route('/go/<qr_id>')
 def redirect_handler(qr_id):
@@ -75,7 +80,6 @@ def redirect_handler(qr_id):
         conn.close()
         if target_link and target_link.startswith("http"):
             return redirect(target_link)
-        
         bot_link = f"https://t.me/QRedit_bot?start={qr_id}"
         return render_template_string(f'<script>window.location.href="{bot_link}";</script>')
     return "❌ QR Topilmadi", 404
@@ -90,92 +94,87 @@ class QRStates(StatesGroup):
     waiting_for_new_link = State()
     waiting_for_batch_count = State()
 
-# --- GRAFIK GENERATSIYASI ---
+# --- GRAFIK FUNKSIYASI ---
 def generate_stats_graph(qr_id):
     conn = get_db_connection()
     df = pd.read_sql(f"SELECT scan_time FROM scan_logs WHERE qr_id = '{qr_id}'", conn)
     conn.close()
     if df.empty: return None
-
     df['hour'] = pd.to_datetime(df['scan_time']).dt.hour
     stats = df['hour'].value_counts().sort_index()
     plt.figure(figsize=(10, 5))
     stats.plot(kind='bar', color='orange')
-    plt.title(f"QR ID: {qr_id} - Faollik (Soatbay)")
-    plt.xlabel("Soat")
-    plt.ylabel("Skanerlar")
+    plt.title(f"QR ID: {qr_id} - Faollik")
     buf = io.BytesIO()
     plt.savefig(buf, format='png')
     buf.seek(0)
     plt.close()
     return buf
 
-# --- ADMIN: BATCH GENERATION (PRINT TAYYOR PNG) ---
+# --- ADMIN: BATCH PDF GENERATION ---
 @dp.message(F.text == "➕ Yangi QR yaratish (Admin)")
 async def admin_ask_count(message: types.Message, state: FSMContext):
     if message.from_user.id == ADMIN_ID:
-        await message.answer("🔢 Nechta QR kod yaratish kerak? Miqdorni kiriting (Masalan: 10):")
+        await message.answer("🔢 Nechta QR yaratish kerak? (PDF formatda, shaffof)")
         await state.set_state(QRStates.waiting_for_batch_count)
 
 @dp.message(QRStates.waiting_for_batch_count)
-async def process_batch_generation(message: types.Message, state: FSMContext):
+async def process_batch_pdf(message: types.Message, state: FSMContext):
     if not message.text.isdigit():
-        await message.answer("❌ Raqam kiriting!")
+        await message.answer("❌ Raqam yuboring!")
         return
     
     count = int(message.text)
-    if count > 50: count = 50
+    count = min(count, 50) # Maksimal 50 ta
 
-    await message.answer(f"⏳ {count} ta shaffof fonli QR kod yaratilmoqda...")
+    await message.answer(f"⏳ {count} ta yuqori sifatli PDF tayyorlanmoqda...")
     
     conn = get_db_connection()
     cur = conn.cursor()
     
-    for i in range(count):
+    for _ in range(count):
         qr_id = f"ID{random.randint(100000, 999999)}"
         pwd = ''.join(random.choices(string.digits, k=4))
-        
         cur.execute("INSERT INTO qrcodes (qr_id, password, target_link) VALUES (%s, %s, %s)", (qr_id, pwd, ""))
         
-        # QR sozlamalari (Print uchun maxsus)
+        # 1. QR yaratish (Transparent PNG)
         qr_url = f"{BASE_URL}/go/{qr_id}"
-        qr = qrcode.QRCode(
-            version=1,
-            error_correction=qrcode.constants.ERROR_CORRECT_H,
-            box_size=10,
-            border=2,
-        )
+        qr = qrcode.QRCode(version=1, error_correction=qrcode.constants.ERROR_CORRECT_H, box_size=20, border=2)
         qr.add_data(qr_url)
         qr.make(fit=True)
+        img_png = qr.make_image(fill_color="black", back_color="transparent").convert('RGBA')
         
-        # Shaffof fonli PNG yaratish
-        img = qr.make_image(fill_color="black", back_color="transparent").convert('RGBA')
+        # 2. PDF yaratish
+        pdf_buf = io.BytesIO()
+        c = canvas.Canvas(pdf_buf, pagesize=(80*mm, 80*mm)) # 8x8 sm o'lcham
+        qr_reader = ImageReader(img_png)
+        c.drawImage(qr_reader, 5*mm, 15*mm, width=70*mm, height=70*mm, mask='auto')
         
-        buf = io.BytesIO()
-        img.save(buf, format="PNG")
-        buf.seek(0)
+        # ID va Parolni PDF pastiga yozish
+        c.setFont("Helvetica-Bold", 12)
+        c.drawCentredString(40*mm, 10*mm, f"ID: {qr_id}  |  PWD: {pwd}")
+        c.showPage()
+        c.save()
+        pdf_buf.seek(0)
         
-        caption = f"🖨 **PRINT TAYYOR (PNG)**\n🆔 `{qr_id}`\n🔑 Parol: `{pwd}`\n🔗 {qr_url}"
-        
-        # Faqat ADMIN_PRINT_ID ga yuboriladi
-        await bot.send_photo(
-            chat_id=ADMIN_PRINT_ID, 
-            photo=BufferedInputFile(buf.getvalue(), filename=f"{qr_id}.png"), 
-            caption=caption, 
+        # 3. PDFni ADMIN_PRINT_ID ga yuborish
+        await bot.send_document(
+            chat_id=ADMIN_PRINT_ID,
+            document=BufferedInputFile(pdf_buf.getvalue(), filename=f"{qr_id}.pdf"),
+            caption=f"🖨 **PRINT READY PDF**\n🆔 `{qr_id}`\n🔑 Parol: `{pwd}`",
             parse_mode="Markdown"
         )
-        await asyncio.sleep(0.4) # Telegram API cheklovlari uchun
+        await asyncio.sleep(0.5)
         
     conn.commit()
     cur.close()
     conn.close()
-    
-    await message.answer(f"✅ Barcha {count} ta QR kod **Admin_Print** manziliga yuborildi.")
+    await message.answer(f"✅ {count} ta PDF yuborildi.")
     await state.clear()
 
-# --- ADMIN: QR SCANNER (RASMDAN PAROL TOPISH) ---
+# --- ADMIN: QR SCANNER ---
 @dp.message(F.photo & (F.from_user.id == ADMIN_ID))
-async def admin_photo_scan(message: types.Message):
+async def admin_qr_scan(message: types.Message):
     photo = message.photo[-1]
     file = await bot.get_file(photo.file_id)
     file_data = await bot.download_file(file.file_path)
@@ -190,16 +189,14 @@ async def admin_photo_scan(message: types.Message):
             cur = conn.cursor(cursor_factory=extras.DictCursor)
             cur.execute("SELECT * FROM qrcodes WHERE qr_id = %s", (qr_id,))
             res = cur.fetchone()
+            if res:
+                await message.answer(f"🔍 **Topildi:**\n🆔 `{res['qr_id']}`\n🔑 Parol: `{res['password']}`\n🔗 {res['target_link'] or 'Link yoq'}", parse_mode="Markdown")
             cur.close()
             conn.close()
-            if res:
-                await message.answer(f"🔍 **QR Ma'lumotlari:**\n🆔 `{res['qr_id']}`\n🔑 Parol: `{res['password']}`\n👤 Egasi: `{res['owner_id'] or 'Yoq'}`\n🔗 Link: {res['target_link'] or 'Yoq'}", parse_mode="Markdown")
-        else:
-            await message.answer("❌ QR kod aniqlanmadi yoki bizning tizimga tegishli emas.")
-    except Exception as e:
-        await message.answer("⚠️ Rasmni o'qishda xatolik.")
+    except:
+        await message.answer("❌ QR o'qib bo'lmadi.")
 
-# --- FOYDALANUVCHILAR UCHUN ASOSIY HANDLERLAR ---
+# --- FOYDALANUVCHI HANDLERLARI ---
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message, state: FSMContext):
     args = message.text.split()[1:]
@@ -211,18 +208,17 @@ async def cmd_start(message: types.Message, state: FSMContext):
         res = cur.fetchone()
         cur.close()
         conn.close()
-        if res:
-            if res[1] is None or res[1] == message.from_user.id:
-                await state.update_data(qr_id=qr_id, correct_password=res[0])
-                await message.answer(f"🆔 QR-ID: {qr_id}\n\nDavom etish uchun parolni kiriting:")
-                await state.set_state(QRStates.waiting_for_password)
-            else:
-                await message.answer("❌ Bu QR kod boshqa foydalanuvchiga biriktirilgan.")
+        if res and (res[1] is None or res[1] == message.from_user.id):
+            await state.update_data(qr_id=qr_id, correct_password=res[0])
+            await message.answer(f"🆔 QR-ID: {qr_id}\n\nParolni kiriting:")
+            await state.set_state(QRStates.waiting_for_password)
+        else:
+            await message.answer("❌ Xato yoki QR band.")
     else:
         kb = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="📊 Mening QR kodlarim")]], resize_keyboard=True)
         if message.from_user.id == ADMIN_ID:
             kb.keyboard.append([KeyboardButton(text="➕ Yangi QR yaratish (Admin)")])
-        await message.answer("Xush kelibsiz! QR kodni boshqarish uchun start bosing yoki pastdagi tugmani tanlang.", reply_markup=kb)
+        await message.answer("Xush kelibsiz!", reply_markup=kb)
 
 @dp.message(QRStates.waiting_for_password)
 async def check_pwd(message: types.Message, state: FSMContext):
@@ -234,10 +230,10 @@ async def check_pwd(message: types.Message, state: FSMContext):
         conn.commit()
         cur.close()
         conn.close()
-        await message.answer("✅ Parol to'g'ri! Endi QR kod yo'naltirishi kerak bo'lgan linkni yuboring:")
+        await message.answer("✅ To'g'ri! Endi yangi linkni yuboring:")
         await state.set_state(QRStates.waiting_for_new_link)
     else:
-        await message.answer("❌ Parol xato. Qayta urinib ko'ring:")
+        await message.answer("❌ Parol xato!")
 
 @dp.message(QRStates.waiting_for_new_link)
 async def save_link(message: types.Message, state: FSMContext):
@@ -249,7 +245,7 @@ async def save_link(message: types.Message, state: FSMContext):
     conn.commit()
     cur.close()
     conn.close()
-    await message.answer(f"✅ Saqlandi!\nSkanerlanganda mana bu manzilga o'tadi: {link}")
+    await message.answer(f"✅ Saqlandi: {link}")
     await state.clear()
 
 @dp.message(F.text == "📊 Mening QR kodlarim")
@@ -259,16 +255,16 @@ async def my_qrs(message: types.Message):
     cur.execute("SELECT * FROM qrcodes WHERE owner_id = %s", (message.from_user.id,))
     rows = cur.fetchall()
     if not rows:
-        await message.answer("Sizda hali biriktirilgan QR kodlar yo'q.")
+        await message.answer("Sizda QR kodlar yo'q.")
     else:
         for row in rows:
             cur.execute("SELECT COUNT(*) FROM scan_logs WHERE qr_id = %s", (row['qr_id'],))
             cnt = cur.fetchone()[0]
             kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="📈 Statistika (Grafik)", callback_data=f"gr_{row['qr_id']}")],
+                [InlineKeyboardButton(text="📈 Statistika", callback_data=f"gr_{row['qr_id']}")],
                 [InlineKeyboardButton(text="✏️ Tahrirlash", callback_data=f"ed_{row['qr_id']}")]
             ])
-            await message.answer(f"🆔 ID: `{row['qr_id']}`\n🔗 Link: {row['target_link'] or 'Yoq'}\n👁 Skanerlar: {cnt}\n🔑 Parol: `{row['password']}`", reply_markup=kb, parse_mode="Markdown")
+            await message.answer(f"🆔 `{row['qr_id']}`\n👁 Skaner: {cnt}\n🔑 `{row['password']}`", reply_markup=kb)
     cur.close()
     conn.close()
 
@@ -277,23 +273,16 @@ async def show_gr(callback: types.CallbackQuery):
     qr_id = callback.data.split("_")[1]
     buf = generate_stats_graph(qr_id)
     if buf:
-        await callback.message.answer_photo(BufferedInputFile(buf.read(), filename="st.png"), caption=f"📊 {qr_id} uchun soatbay faollik")
+        await callback.message.answer_photo(BufferedInputFile(buf.read(), filename="st.png"))
     else:
-        await callback.answer("Hali skanerlash ma'lumotlari mavjud emas.")
+        await callback.answer("Hali ma'lumot yo'q")
 
 @dp.callback_query(F.data.startswith("ed_"))
 async def ed_start(callback: types.CallbackQuery, state: FSMContext):
     qr_id = callback.data.split("_")[1]
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("SELECT password FROM qrcodes WHERE qr_id = %s", (qr_id,))
-    pwd = cur.fetchone()[0]
-    cur.close()
-    conn.close()
-    await state.update_data(qr_id=qr_id, correct_password=pwd)
-    await callback.message.answer("Xavfsizlik uchun parolni kiriting:")
+    await state.update_data(qr_id=qr_id)
+    await callback.message.answer("Parolni kiriting:")
     await state.set_state(QRStates.waiting_for_password)
-    await callback.answer()
 
 def run_flask():
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
