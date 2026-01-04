@@ -9,8 +9,8 @@ from psycopg2 import extras
 import logging
 import matplotlib.pyplot as plt
 import pandas as pd
-from PIL import Image
-from pyzbar.pyzbar import decode
+import numpy as np
+import cv2  # pyzbar o'rniga opencv ishlatamiz
 from flask import Flask, redirect, render_template_string
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
@@ -56,6 +56,9 @@ def init_db():
 init_db()
 
 # --- WEB SERVER (REDIRECTOR) ---
+@app.route('/')
+def home(): return "QR Server Active"
+
 @app.route('/go/<qr_id>')
 def redirect_handler(qr_id):
     conn = get_db_connection()
@@ -104,19 +107,25 @@ def generate_stats_graph(qr_id):
     plt.close()
     return buf
 
-# --- ADMIN UCHUN QR SKANER (RASM ORQALI) ---
+# --- ADMIN UCHUN QR SKANER (OpenCV ishlatilgan) ---
 @dp.message(F.photo & (F.from_user.id == ADMIN_ID))
 async def admin_photo_scan(message: types.Message):
     photo = message.photo[-1]
     file = await bot.get_file(photo.file_id)
     file_data = await bot.download_file(file.file_path)
+    
     try:
-        img = Image.open(io.BytesIO(file_data.read()))
-        decoded = decode(img)
-        if decoded:
-            qr_content = decoded[0].data.decode('utf-8')
-            if "/go/" in qr_content:
-                qr_id = qr_content.split("/go/")[-1]
+        # Rasmni OpenCV o'qiydigan formatga o'tkazish
+        file_bytes = np.asarray(bytearray(file_data.read()), dtype=np.uint8)
+        img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+        
+        # QR kodni aniqlash
+        detector = cv2.QRCodeDetector()
+        data, _, _ = detector.detectAndDecode(img)
+        
+        if data:
+            if "/go/" in data:
+                qr_id = data.split("/go/")[-1]
                 conn = get_db_connection()
                 cur = conn.cursor(cursor_factory=extras.DictCursor)
                 cur.execute("SELECT * FROM qrcodes WHERE qr_id = %s", (qr_id,))
@@ -124,17 +133,18 @@ async def admin_photo_scan(message: types.Message):
                 cur.close()
                 conn.close()
                 if res:
-                    await message.answer(f"🔍 **QR Topildi:**\n🆔 ID: `{res['qr_id']}`\n🔑 Parol: `{res['password']}`\n👤 Egasi: `{res['owner_id']}`\n🔗 Link: {res['target_link']}", parse_mode="Markdown")
+                    await message.answer(f"🔍 **QR Topildi:**\n🆔 ID: `{res['qr_id']}`\n🔑 Parol: `{res['password']}`\n👤 Egasi: `{res['owner_id'] or 'Yoq'}`\n🔗 Link: {res['target_link'] or 'Yoq'}", parse_mode="Markdown")
                 else:
                     await message.answer(f"❌ ID: `{qr_id}` bazada yo'q.")
             else:
-                await message.answer(f"ℹ️ Bu begona QR kod: `{qr_content}`")
+                await message.answer(f"ℹ️ Bu begona QR kod: `{data}`")
         else:
             await message.answer("❌ Rasmda QR kod aniqlanmadi.")
     except Exception as e:
+        logging.error(f"Scan error: {e}")
         await message.answer("⚠️ QR tahlil qilishda xatolik.")
 
-# --- ASOSIY KOMANDALAR ---
+# --- ASOSIY HANDLERLAR (AVVALGI BILAN BIR XIL) ---
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message, state: FSMContext):
     args = message.text.split()[1:]
@@ -200,10 +210,10 @@ async def my_qrs(message: types.Message):
             cur.execute("SELECT COUNT(*) FROM scan_logs WHERE qr_id = %s", (row['qr_id'],))
             cnt = cur.fetchone()[0]
             kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="📈 Statistika (Grafik)", callback_data=f"gr_{row['qr_id']}")],
+                [InlineKeyboardButton(text="📈 Statistika", callback_data=f"gr_{row['qr_id']}")],
                 [InlineKeyboardButton(text="✏️ Tahrirlash", callback_data=f"ed_{row['qr_id']}")]
             ])
-            await message.answer(f"🆔 `{row['qr_id']}`\n🔗 Link: {row['target_link']}\n👁 Skanerlar: {cnt}\n🔑 Parol: `{row['password']}`", reply_markup=kb, parse_mode="Markdown")
+            await message.answer(f"🆔 `{row['qr_id']}`\n🔗 Link: {row['target_link']}\n👁 Skaner: {cnt}\n🔑 Parol: `{row['password']}`", reply_markup=kb, parse_mode="Markdown")
     cur.close()
     conn.close()
 
@@ -214,7 +224,7 @@ async def show_gr(callback: types.CallbackQuery):
     if buf:
         await callback.message.answer_photo(BufferedInputFile(buf.read(), filename="st.png"), caption=f"📊 {qr_id} faolligi")
     else:
-        await callback.answer("Ma'lumot kam.")
+        await callback.answer("Ma'lumot yetarli emas.")
 
 @dp.callback_query(F.data.startswith("ed_"))
 async def ed_start(callback: types.CallbackQuery, state: FSMContext):
