@@ -20,7 +20,7 @@ from aiogram.types import BufferedInputFile, ReplyKeyboardMarkup, KeyboardButton
 from threading import Thread
 
 # --- SOZLAMALAR ---
-API_TOKEN = '8110490890:AAHTd6WduBLqjqD2lHfT62x1XnaELBQfjuY'
+API_TOKEN = '8110490890:AAHT7WrEHMe9XEoxd2WoniH9WlaIhR0YUNY'
 ADMIN_ID = 7693087447         # Siz (Buyruq beruvchi)
 ADMIN_PRINT_ID = 7878916781   # BU YERGA PRINT ADMIN ID-SINI YOZING (Hozircha o'zingizniki turibdi)
 
@@ -271,3 +271,4 @@ async def run_bot():
 if __name__ == "__main__":
     Thread(target=run_flask).start()
     asyncio.run(run_bot())
+
