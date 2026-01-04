@@ -152,7 +152,7 @@ async def check_password(message: types.Message, state: FSMContext):
         cur.close()
         conn.close()
         
-        await message.answer("✅ Parol to'g'ri! Endi yangi linkni yuboring:")
+        await message.answer("✅ Parol to'g'ri! Endi yangi linkni yuboring, \n masalan: instagram.com/xpremium_uz  http:// siz yozing")
         await state.set_state(QRStates.waiting_for_new_link)
     else:
         await message.answer("❌ Xato parol. Qayta urinib ko'ring:")
@@ -250,3 +250,4 @@ async def run_bot():
 if __name__ == "__main__":
     Thread(target=run_flask).start()
     asyncio.run(run_bot())
+
